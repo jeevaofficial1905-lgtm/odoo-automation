@@ -259,30 +259,27 @@ def _post_single_document(doc: dict, config: AppConfig, operator: dict | None = 
 
 
 def _post_documents_locked(documents: list[dict], config: AppConfig, operator: dict | None = None) -> dict:
-    """Post or safely resume documents using parallel workers."""
+    """Post or safely resume documents sequentially so that authentication errors immediately halt subsequent web calls."""
     all_calls = []
     results_by_key = {}
-    
-    max_workers = min(8, len(documents))
-    if max_workers <= 1:
-        for doc in documents:
-            row, calls = _post_single_document(doc, config, operator)
+    auth_failed = False
+
+    for doc in documents:
+        if auth_failed:
+            save_posting(
+                doc["document_key"], status="NOT_ATTEMPTED_AUTH",
+                error="Skipped due to prior Ginesys authentication failure.",
+            )
+            row = _row_from_state(doc, get_posting(doc["document_key"]), "NOT_ATTEMPTED_AUTH")
             results_by_key[doc["document_key"]] = row
-            all_calls.extend(calls)
-    else:
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(_post_single_document, doc, config, operator): doc
-                for doc in documents
-            }
-            for future in as_completed(futures):
-                doc = futures[future]
-                try:
-                    row, calls = future.result()
-                    results_by_key[doc["document_key"]] = row
-                    all_calls.extend(calls)
-                except Exception as exc:
-                    results_by_key[doc["document_key"]] = _row_from_state(doc, {"status": "FAILED", "error": str(exc)})
+            continue
+
+        row, calls = _post_single_document(doc, config, operator)
+        results_by_key[doc["document_key"]] = row
+        all_calls.extend(calls)
+
+        if row.get("status") == "AUTH_FAILED":
+            auth_failed = True
 
     results = [results_by_key[doc["document_key"]] for doc in documents if doc["document_key"] in results_by_key]
     success = sum(1 for row in results if row["status"] in {"SUCCESS", "ALREADY_POSTED"})
