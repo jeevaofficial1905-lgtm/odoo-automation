@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from config_loader import load_config
-from ginesys_client import GinesysAuthenticationError, GinesysClient, GinesysError
+from ginesys_client import GinesysAuthenticationError, GinesysClient, GinesysError, _GLOBAL_ITEM_LOOKUP_CACHE
 
 
 class FakeResponse:
@@ -51,6 +51,9 @@ def config():
 
 
 class WebApiPayloadTests(unittest.TestCase):
+    def setUp(self):
+        _GLOBAL_ITEM_LOOKUP_CACHE.clear()
+
     def test_bearer_header_and_scheme_defaults(self):
         session = FakeSession()
         client = GinesysClient(config(), session)
